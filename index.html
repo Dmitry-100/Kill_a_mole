@@ -156,11 +156,16 @@
   .lb-form{display:flex; gap:8px; margin-bottom:8px;}
   .lb-form input{
     flex:1 1 auto; min-width:0; padding:13px 12px; border-radius:14px;
-    border:1px solid #2f5277; background:#0e1d31; color:var(--text);
-    font-size:15px; font-family:inherit; outline:none;
+    border:1px solid #2f5277; background:#0e1d31; color:var(--accent2);
+    outline:none;
+    text-align:center; text-transform:uppercase; font-weight:900;
+    font-size:22px; letter-spacing:10px; text-indent:10px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
+  .lb-form input::placeholder{color:#3a5778; letter-spacing:10px;}
   .lb-form input:focus{border-color:var(--accent);}
   .lb-form .btn{width:auto; flex:0 0 auto; margin-top:0; padding:13px 16px; font-size:15px;}
+  .lb-sep{text-align:center; color:var(--muted); font-weight:800; letter-spacing:2px; padding:2px 0;}
   .lb-status{font-size:12px; color:var(--muted); margin:0 0 8px; min-height:15px;}
   .lb-list{display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow:auto; -webkit-overflow-scrolling:touch;}
   .lb-item{
@@ -225,7 +230,7 @@
       <div class="lb">
         <h3>🏆 Рейтинг</h3>
         <div class="lb-form">
-          <input id="playerName" maxlength="24" placeholder="Имя или команда" autocomplete="off" />
+          <input id="playerName" maxlength="3" placeholder="AAA" autocomplete="off" autocapitalize="characters" spellcheck="false" />
           <button class="btn" id="submitScoreBtn">В топ</button>
         </div>
         <div class="lb-status" id="lbStatus"></div>
@@ -259,14 +264,15 @@
      2. Скопируй URL из адресной строки (вид https://jsonblob.com/<id>)
         и вставь его ниже в кавычки.
      Пусто = рейтинг локальный (только на этом устройстве). */
-  const LEADERBOARD_URL = "";
+  const LEADERBOARD_URL = "https://jsonblob.com/api/jsonBlob/019ef98f-c9bd-7464-9a56-03cbeedc3a79";
 
-  const LB_MAX = 100;
+  const LB_MAX = 100;   // сколько результатов храним
+  const LB_SHOW = 10;   // сколько показываем в таблице
   function lbApi(u){
     u=(u||"").trim();
     if(!u) return "";
     if(u.indexOf("/api/jsonBlob/")>=0) return u;
-    const m=u.match(/jsonblob\.com\/([0-9a-fA-F-]+)\/?$/);
+    const m=u.match(/jsonblob\.com\/([0-9a-fA-F-]+)/);
     if(m) return "https://jsonblob.com/api/jsonBlob/"+m[1];
     return u;
   }
@@ -295,16 +301,23 @@
     return a;
   }
   function lbEsc(s){ return String(s).replace(/[<>&]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
+  const LB_MEDAL=["🥇","🥈","🥉"];
+  function lbRow(e,i,hlTs){
+    const me = (hlTs && e.t===hlTs) ? " me" : "";
+    const pos = i<3 ? LB_MEDAL[i] : (i+1);
+    return '<div class="lb-item'+me+'"><span class="pos">'+pos+'</span><span class="nm">'+lbEsc(e.n||"AAA")+'</span><span class="sc">'+(e.s|0)+'</span></div>';
+  }
   function lbRender(listEl, statusEl, arr, hlTs){
     arr = lbSort(arr||[]);
     if(!arr.length){ listEl.innerHTML='<div class="lb-empty">Пока нет результатов — стань первым!</div>'; }
     else {
-      const medal=["🥇","🥈","🥉"];
-      listEl.innerHTML = arr.map((e,i)=>{
-        const me = (hlTs && e.t===hlTs) ? " me" : "";
-        const pos = i<3 ? medal[i] : (i+1);
-        return '<div class="lb-item'+me+'"><span class="pos">'+pos+'</span><span class="nm">'+lbEsc(e.n||"Аноним")+'</span><span class="sc">'+(e.s|0)+'</span></div>';
-      }).join("");
+      const top = arr.slice(0, LB_SHOW);
+      let rows = top.map((e,i)=>lbRow(e,i,hlTs));
+      if(hlTs){
+        const mi = arr.findIndex(e=>e.t===hlTs);
+        if(mi>=LB_SHOW){ rows.push('<div class="lb-sep">···</div>'); rows.push(lbRow(arr[mi], mi, hlTs)); }
+      }
+      listEl.innerHTML = rows.join("");
     }
     if(statusEl) statusEl.textContent = LB_REMOTE ? ("Общий рейтинг · участников: "+arr.length) : "Локальный рейтинг (только это устройство)";
   }
@@ -351,7 +364,9 @@
   const lbStatus = document.getElementById("lbStatus");
   const playerName = document.getElementById("playerName");
   const submitScoreBtn = document.getElementById("submitScoreBtn");
-  try{ playerName.value = localStorage.getItem("wam_name")||""; }catch(e){}
+  function lbCleanName(s){ return String(s||"").toUpperCase().replace(/[^A-ZА-ЯЁ0-9]/g,"").slice(0,3); }
+  try{ playerName.value = lbCleanName(localStorage.getItem("wam_name")); }catch(e){}
+  playerName.addEventListener("input", ()=>{ const v=lbCleanName(playerName.value); if(v!==playerName.value) playerName.value=v; });
 
   const holes = [];
   for(let i=0;i<HOLES;i++){
@@ -551,7 +566,8 @@
   document.getElementById("restartBtn").addEventListener("click", startGame);
 
   submitScoreBtn.addEventListener("click", async ()=>{
-    const nm = (playerName.value||"").trim().slice(0,24) || "Аноним";
+    const nm = lbCleanName(playerName.value) || "AAA";
+    playerName.value = nm;
     try{ localStorage.setItem("wam_name", nm); }catch(e){}
     if(submittedTs){ lbStatus.textContent="Результат уже отправлен ✓"; return; }
     const entry = {n:nm, s:score|0, t:Date.now()};
