@@ -149,6 +149,30 @@
   .breakdown .b .l{font-size:10px;color:var(--muted);text-transform:uppercase;}
   .footnote{font-size:11px;color:#5f7693;margin-top:14px;}
   .miss-flash{position:absolute;inset:0;z-index:40;pointer-events:none;background:radial-gradient(circle at center,#ff5a5f22,transparent 60%);opacity:0;}
+
+  /* ---------- Leaderboard ---------- */
+  .lb{margin-top:16px; text-align:left;}
+  .lb h3{margin:0 0 8px; font-size:13px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:var(--muted);}
+  .lb-form{display:flex; gap:8px; margin-bottom:8px;}
+  .lb-form input{
+    flex:1 1 auto; min-width:0; padding:13px 12px; border-radius:14px;
+    border:1px solid #2f5277; background:#0e1d31; color:var(--text);
+    font-size:15px; font-family:inherit; outline:none;
+  }
+  .lb-form input:focus{border-color:var(--accent);}
+  .lb-form .btn{width:auto; flex:0 0 auto; margin-top:0; padding:13px 16px; font-size:15px;}
+  .lb-status{font-size:12px; color:var(--muted); margin:0 0 8px; min-height:15px;}
+  .lb-list{display:flex; flex-direction:column; gap:6px; max-height:40vh; overflow:auto; -webkit-overflow-scrolling:touch;}
+  .lb-item{
+    display:flex; align-items:center; gap:10px;
+    background:#0e1d31; border:1px solid #20375a; border-radius:12px;
+    padding:9px 12px; font-size:14px;
+  }
+  .lb-item.me{border-color:var(--accent2); background:#102a36; box-shadow:0 0 0 1px var(--accent2) inset;}
+  .lb-item .pos{flex:0 0 auto; width:28px; font-weight:800; color:var(--muted); text-align:center;}
+  .lb-item .nm{flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;}
+  .lb-item .sc{flex:0 0 auto; font-weight:800; color:var(--accent2);}
+  .lb-empty{color:var(--muted); font-size:13px; padding:8px 2px;}
 </style>
 </head>
 <body>
@@ -179,6 +203,7 @@
       </div>
       <p style="font-size:13px">Чем длиннее серия точных ударов — тем больше множитель. Промах по полю сбрасывает серию.</p>
       <button class="btn" id="startBtn">Начать игру</button>
+      <button class="btn secondary" id="viewBoardBtn">🏆 Посмотреть рейтинг</button>
       <div class="footnote">Игра-разминка для стратсессии. Открой на телефоне и передавай по кругу 🤝</div>
     </div>
   </div>
@@ -196,8 +221,29 @@
         <div class="b"><div class="n" id="bProject" style="color:#00a3e0">0</div><div class="l">Проекты</div></div>
       </div>
       <p style="margin-top:14px">Лучший результат: <b id="best">0</b></p>
+
+      <div class="lb">
+        <h3>🏆 Рейтинг</h3>
+        <div class="lb-form">
+          <input id="playerName" maxlength="24" placeholder="Имя или команда" autocomplete="off" />
+          <button class="btn" id="submitScoreBtn">В топ</button>
+        </div>
+        <div class="lb-status" id="lbStatus"></div>
+        <div class="lb-list" id="lbList"></div>
+      </div>
+
       <button class="btn" id="restartBtn">Играть снова</button>
       <button class="btn secondary" id="shareBtn">Поделиться результатом</button>
+    </div>
+  </div>
+
+  <!-- LEADERBOARD -->
+  <div class="overlay hidden" id="boardScreen">
+    <div class="card">
+      <h2>🏆 Рейтинг</h2>
+      <div class="lb-status" id="lbStatus2"></div>
+      <div class="lb-list" id="lbList2"></div>
+      <button class="btn" id="boardCloseBtn">Закрыть</button>
     </div>
   </div>
 
@@ -207,6 +253,66 @@
 <script>
 (function(){
   "use strict";
+
+  /* ====== ЛИДЕРБОРД (общий рейтинг) ======
+     1. Зайди на https://jsonblob.com, замени содержимое на  []  и нажми Save.
+     2. Скопируй URL из адресной строки (вид https://jsonblob.com/<id>)
+        и вставь его ниже в кавычки.
+     Пусто = рейтинг локальный (только на этом устройстве). */
+  const LEADERBOARD_URL = "";
+
+  const LB_MAX = 100;
+  function lbApi(u){
+    u=(u||"").trim();
+    if(!u) return "";
+    if(u.indexOf("/api/jsonBlob/")>=0) return u;
+    const m=u.match(/jsonblob\.com\/([0-9a-fA-F-]+)\/?$/);
+    if(m) return "https://jsonblob.com/api/jsonBlob/"+m[1];
+    return u;
+  }
+  const LB_ENDPOINT = lbApi(LEADERBOARD_URL);
+  const LB_REMOTE = !!LB_ENDPOINT;
+  let lastTs=0, submittedTs=0;
+
+  function lbLocalGet(){ try{ return JSON.parse(localStorage.getItem("wam_board")||"[]")||[]; }catch(e){ return []; } }
+  function lbLocalSet(a){ try{ localStorage.setItem("wam_board", JSON.stringify(a)); }catch(e){} }
+  function lbSort(a){ return a.slice().sort((x,y)=>(y.s-x.s)||((x.t||0)-(y.t||0))).slice(0,LB_MAX); }
+
+  async function lbFetch(){
+    if(!LB_REMOTE) return lbLocalGet();
+    const r = await fetch(LB_ENDPOINT, {cache:"no-store"});
+    if(!r.ok) throw new Error("GET "+r.status);
+    const d = await r.json();
+    return Array.isArray(d) ? d : [];
+  }
+  async function lbSubmit(entry){
+    if(!LB_REMOTE){ const a=lbSort(lbLocalGet().concat([entry])); lbLocalSet(a); return a; }
+    let a=[]; try{ a=await lbFetch(); }catch(e){ a=[]; }
+    a = lbSort(a.concat([entry]));
+    const r = await fetch(LB_ENDPOINT, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(a)});
+    if(!r.ok) throw new Error("PUT "+r.status);
+    lbLocalSet(a);
+    return a;
+  }
+  function lbEsc(s){ return String(s).replace(/[<>&]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
+  function lbRender(listEl, statusEl, arr, hlTs){
+    arr = lbSort(arr||[]);
+    if(!arr.length){ listEl.innerHTML='<div class="lb-empty">Пока нет результатов — стань первым!</div>'; }
+    else {
+      const medal=["🥇","🥈","🥉"];
+      listEl.innerHTML = arr.map((e,i)=>{
+        const me = (hlTs && e.t===hlTs) ? " me" : "";
+        const pos = i<3 ? medal[i] : (i+1);
+        return '<div class="lb-item'+me+'"><span class="pos">'+pos+'</span><span class="nm">'+lbEsc(e.n||"Аноним")+'</span><span class="sc">'+(e.s|0)+'</span></div>';
+      }).join("");
+    }
+    if(statusEl) statusEl.textContent = LB_REMOTE ? ("Общий рейтинг · участников: "+arr.length) : "Локальный рейтинг (только это устройство)";
+  }
+  function loadBoardInto(listEl, statusEl, hlTs){
+    statusEl.textContent="Загрузка рейтинга…";
+    lbFetch().then(a=>lbRender(listEl, statusEl, a, hlTs))
+             .catch(()=>{ lbRender(listEl, statusEl, lbLocalGet(), hlTs); statusEl.textContent="Общий рейтинг недоступен — показан локальный."; });
+  }
 
   const PROBLEMS = {
     production: { emoji:"🏭", items:[
@@ -241,6 +347,11 @@
   const startScreen = document.getElementById("startScreen");
   const endScreen = document.getElementById("endScreen");
   const missFlash = document.getElementById("missFlash");
+  const lbList = document.getElementById("lbList");
+  const lbStatus = document.getElementById("lbStatus");
+  const playerName = document.getElementById("playerName");
+  const submitScoreBtn = document.getElementById("submitScoreBtn");
+  try{ playerName.value = localStorage.getItem("wam_name")||""; }catch(e){}
 
   const holes = [];
   for(let i=0;i<HOLES;i++){
@@ -274,6 +385,8 @@
     score=0; combo=0; maxCombo=0; timeLeft=GAME_TIME;
     kills.production=kills.market=kills.project=kills.golden=0;
     running=true;
+    submittedTs=0; lastTs=0;
+    submitScoreBtn.disabled=false;
     updateHUD();
     startScreen.classList.add("hidden");
     endScreen.classList.add("hidden");
@@ -425,6 +538,8 @@
     if(score>best){ best=score; try{localStorage.setItem("wam_best",String(best));}catch(e){} }
     document.getElementById("best").textContent=best;
     endScreen.classList.remove("hidden");
+    lbStatus.textContent="";
+    loadBoardInto(lbList, lbStatus, 0);
   }
 
   holes.forEach((hole)=>{
@@ -434,6 +549,32 @@
 
   document.getElementById("startBtn").addEventListener("click", startGame);
   document.getElementById("restartBtn").addEventListener("click", startGame);
+
+  submitScoreBtn.addEventListener("click", async ()=>{
+    const nm = (playerName.value||"").trim().slice(0,24) || "Аноним";
+    try{ localStorage.setItem("wam_name", nm); }catch(e){}
+    if(submittedTs){ lbStatus.textContent="Результат уже отправлен ✓"; return; }
+    const entry = {n:nm, s:score|0, t:Date.now()};
+    lastTs = entry.t;
+    submitScoreBtn.disabled=true; lbStatus.textContent="Отправка…";
+    try{
+      const arr = await lbSubmit(entry);
+      submittedTs = entry.t;
+      lbRender(lbList, lbStatus, arr, entry.t);
+      const pos = lbSort(arr).findIndex(e=>e.t===entry.t)+1;
+      lbStatus.textContent = (LB_REMOTE?"Отправлено ✓":"Сохранено ✓") + (pos?(" · ваше место: "+pos):"");
+    }catch(e){
+      submitScoreBtn.disabled=false;
+      lbStatus.textContent = LB_REMOTE ? "Ошибка отправки — проверь интернет или URL хранилища." : "Не удалось сохранить.";
+    }
+  });
+
+  const boardScreen = document.getElementById("boardScreen");
+  document.getElementById("viewBoardBtn").addEventListener("click", ()=>{
+    boardScreen.classList.remove("hidden");
+    loadBoardInto(document.getElementById("lbList2"), document.getElementById("lbStatus2"), 0);
+  });
+  document.getElementById("boardCloseBtn").addEventListener("click", ()=>boardScreen.classList.add("hidden"));
   document.getElementById("shareBtn").addEventListener("click", async ()=>{
     const txt = "Я прибил кротов кризиса на "+score+" очков ("+rankFor(score)+") в игре «Убей крота» — ТОП-100! 🔨";
     try{
