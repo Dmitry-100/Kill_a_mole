@@ -6,13 +6,13 @@
 <meta name="theme-color" content="#0b1622" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<meta name="description" content="Убей крота кризиса — мобильная мини-игра для стратсессии НЛМК ТОП-100." />
-<title>Убей крота — НЛМК ТОП-100</title>
+<meta name="description" content="Убей крота кризиса — мобильная мини-игра для стратсессии ТОП-100." />
+<title>Убей крота — ТОП-100</title>
 <style>
   :root{
     --bg:#0b1622;
     --panel:#13243b;
-    --accent:#00a3e0;      /* НЛМК синий */
+    --accent:#00a3e0;      /* синий */
     --accent2:#00d1b2;
     --danger:#ff5a5f;
     --warn:#ffb020;
@@ -154,7 +154,7 @@
 <body>
 <div id="app">
   <header>
-    <div class="brand"><span class="dot"></span> НЛМК · Стратсессия ТОП-100</div>
+    <div class="brand"><span class="dot"></span> Стратсессия ТОП-100</div>
     <h1>Убей <span class="crisis">крота кризиса</span> 🔨</h1>
     <div class="hud">
       <div class="stat time"><div class="label">Время</div><div class="value" id="time">60</div></div>
@@ -435,9 +435,9 @@
   document.getElementById("startBtn").addEventListener("click", startGame);
   document.getElementById("restartBtn").addEventListener("click", startGame);
   document.getElementById("shareBtn").addEventListener("click", async ()=>{
-    const txt = "Я прибил кротов кризиса на "+score+" очков ("+rankFor(score)+") в игре «Убей крота» — НЛМК ТОП-100! 🔨";
+    const txt = "Я прибил кротов кризиса на "+score+" очков ("+rankFor(score)+") в игре «Убей крота» — ТОП-100! 🔨";
     try{
-      if(navigator.share){ await navigator.share({title:"Убей крота — НЛМК ТОП-100", text:txt}); }
+      if(navigator.share){ await navigator.share({title:"Убей крота — ТОП-100", text:txt}); }
       else { await navigator.clipboard.writeText(txt); alert("Результат скопирован в буфер обмена:\n\n"+txt); }
     }catch(e){}
   });
