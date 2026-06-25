@@ -101,6 +101,8 @@
   .mole.market{background:linear-gradient(180deg,#ffd27a,#ffb020);}
   .mole.project{background:linear-gradient(180deg,#7ad0ff,#00a3e0);}
   .mole.golden{background:linear-gradient(180deg,#fff1a8,#ffd23f); animation:pulse .6s infinite alternate;}
+  .mole.cat{background:linear-gradient(180deg,#d3dae1,#9aa6b2);}
+  .mole.cat .emoji{filter:drop-shadow(0 2px 3px #0006) saturate(.6);}
   @keyframes pulse{from{box-shadow:0 8px 18px #00000055, 0 0 0 0 #ffd23f88;}to{box-shadow:0 8px 18px #00000055, 0 0 22px 6px #ffd23f88;}}
 
   .splash{
@@ -130,7 +132,7 @@
   .legend .row{display:flex; align-items:center; gap:10px; font-size:13px;}
   .legend .chip{width:22px;height:22px;border-radius:7px;flex:0 0 auto;box-shadow:inset 0 2px 0 #ffffff33;}
   .chip.production{background:#ff5a5f;} .chip.market{background:#ffb020;}
-  .chip.project{background:#00a3e0;} .chip.golden{background:#ffd23f;}
+  .chip.project{background:#00a3e0;} .chip.golden{background:#ffd23f;} .chip.cat{background:#9aa6b2;}
   .btn{
     appearance:none; border:0; cursor:pointer; width:100%;
     margin-top:10px; padding:16px; border-radius:16px;
@@ -205,6 +207,7 @@
         <div class="row"><span class="chip market"></span> <b>Рынок</b> — цены, спрос, санкции</div>
         <div class="row"><span class="chip project"></span> <b>Проекты</b> — сроки, бюджет, подрядчики</div>
         <div class="row"><span class="chip golden"></span> <b>Системная проблема</b> — золотой крот, ×2,5 очков</div>
+        <div class="row"><span class="chip cat"></span> <b>Закупочный кот</b> 🐱 — НЕ бей! Штраф −15 и сброс серии</div>
       </div>
       <p style="font-size:13px">Чем длиннее серия точных ударов — тем больше множитель. Промах по полю сбрасывает серию.</p>
       <button class="btn" id="startBtn">Начать игру</button>
@@ -286,17 +289,24 @@
 
   async function lbFetch(){
     if(!LB_REMOTE) return lbLocalGet();
-    const r = await fetch(LB_ENDPOINT, {cache:"no-store"});
-    if(!r.ok) throw new Error("GET "+r.status);
-    const d = await r.json();
-    return Array.isArray(d) ? d : [];
+    let lastErr;
+    for(let attempt=0; attempt<2; attempt++){
+      try{
+        const r = await fetch(LB_ENDPOINT, {cache:"no-store", headers:{"Accept":"application/json"}});
+        if(!r.ok) throw new Error("HTTP "+r.status);
+        const d = await r.json();
+        return Array.isArray(d) ? d : [];
+      }catch(e){ lastErr=e; }
+    }
+    throw lastErr || new Error("сеть");
   }
   async function lbSubmit(entry){
-    if(!LB_REMOTE){ const a=lbSort(lbLocalGet().concat([entry])); lbLocalSet(a); return a; }
+    lbLocalSet(lbSort(lbLocalGet().concat([entry])));   // всегда мирроним локально
+    if(!LB_REMOTE) return lbLocalGet();
     let a=[]; try{ a=await lbFetch(); }catch(e){ a=[]; }
     a = lbSort(a.concat([entry]));
     const r = await fetch(LB_ENDPOINT, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(a)});
-    if(!r.ok) throw new Error("PUT "+r.status);
+    if(!r.ok) throw new Error("HTTP "+r.status);
     lbLocalSet(a);
     return a;
   }
@@ -324,7 +334,7 @@
   function loadBoardInto(listEl, statusEl, hlTs){
     statusEl.textContent="Загрузка рейтинга…";
     lbFetch().then(a=>lbRender(listEl, statusEl, a, hlTs))
-             .catch(()=>{ lbRender(listEl, statusEl, lbLocalGet(), hlTs); statusEl.textContent="Общий рейтинг недоступен — показан локальный."; });
+             .catch(err=>{ lbRender(listEl, statusEl, lbLocalGet(), hlTs); statusEl.textContent="Онлайн-рейтинг недоступен ("+((err&&err.message)||"сеть")+") — показан локальный."; });
   }
 
   const PROBLEMS = {
@@ -342,6 +352,7 @@
     ]},
   };
   const GOLDEN = { emoji:"⚠️", items:["Системный риск","Кризис управления","Цепная реакция"] };
+  const CAT = { emoji:"🐱", items:["Закупки","Тендер","Контракт","Поставщик","Согласование"] };
   const CATS = ["production","market","project"];
 
   const HOLES = 9;
@@ -394,6 +405,7 @@
   }
   function hitSound(golden){ golden ? (beep(880,.08,"square",.08),setTimeout(()=>beep(1320,.12,"square",.08),60)) : beep(660,.07,"square",.07); }
   function missSound(){ beep(140,.12,"sawtooth",.05); }
+  function catSound(){ beep(300,.12,"sawtooth",.06); setTimeout(()=>beep(170,.18,"sawtooth",.06),90); }
   function vibrate(ms){ if(navigator.vibrate) try{navigator.vibrate(ms);}catch(e){} }
 
   function startGame(){
@@ -441,11 +453,14 @@
       const free = freeHoles();
       if(!free.length) return;
       const idx = free[Math.floor(Math.random()*free.length)];
-      const golden = Math.random() < 0.08;
-      let cat, emoji, label;
-      if(golden){
-        cat="golden"; emoji=GOLDEN.emoji;
+      const r = Math.random();
+      let cat, emoji, label, golden=false, penalty=false;
+      if(r < 0.08){
+        golden=true; cat="golden"; emoji=GOLDEN.emoji;
         label = GOLDEN.items[Math.floor(Math.random()*GOLDEN.items.length)];
+      } else if(r < 0.22){
+        penalty=true; cat="cat"; emoji=CAT.emoji;
+        label = CAT.items[Math.floor(Math.random()*CAT.items.length)];
       } else {
         cat = CATS[Math.floor(Math.random()*CATS.length)];
         const pool = PROBLEMS[cat];
@@ -453,7 +468,7 @@
         label = pool.items[Math.floor(Math.random()*pool.items.length)];
       }
       const upTime = Math.max(650, 1500 - d*820) + Math.random()*300;
-      showMole(idx, {cat, emoji, label, golden}, upTime);
+      showMole(idx, {cat, emoji, label, golden, penalty}, upTime);
     }
   }
 
@@ -476,7 +491,7 @@
     clearTimeout(slot.hideAt);
     holes[idx].classList.remove("up");
     active[idx]=null;
-    if(missed && slot.alive && running){ combo=0; updateHUD(); }
+    if(missed && slot.alive && running && !slot.data.penalty){ combo=0; updateHUD(); }
   }
 
   function whack(idx){
@@ -489,6 +504,18 @@
     hole.classList.remove("up");
     hole.classList.add("whacked");
     active[idx]=null;
+
+    if(slot.data.penalty){
+      combo=0;
+      const lost = Math.min(score, 15);
+      score -= lost;
+      catSound();
+      vibrate([40,30,40]);
+      flashRed();
+      splash(hole, "−"+lost, false, true);
+      updateHUD();
+      return;
+    }
 
     const golden = slot.data.golden;
     combo++; if(combo>maxCombo) maxCombo=combo;
@@ -504,16 +531,20 @@
     updateHUD();
   }
 
-  function registerMiss(){
-    combo=0; updateHUD(); missSound(); vibrate(8);
+  function flashRed(){
     missFlash.style.transition="none"; missFlash.style.opacity="1";
     requestAnimationFrame(()=>{ missFlash.style.transition="opacity .4s"; missFlash.style.opacity="0"; });
   }
+  function registerMiss(){
+    combo=0; updateHUD(); missSound(); vibrate(8);
+    flashRed();
+  }
 
-  function splash(hole, text, golden){
+  function splash(hole, text, golden, penalty){
     const s=document.createElement("div");
     s.className="splash"; s.textContent=text;
     if(golden) s.style.color="#ffd23f";
+    if(penalty) s.style.color="#ff5a5f";
     const r=hole.getBoundingClientRect();
     const ar=document.getElementById("app").getBoundingClientRect();
     s.style.left=(r.left-ar.left + r.width/2)+"px";
@@ -581,7 +612,7 @@
       lbStatus.textContent = (LB_REMOTE?"Отправлено ✓":"Сохранено ✓") + (pos?(" · ваше место: "+pos):"");
     }catch(e){
       submitScoreBtn.disabled=false;
-      lbStatus.textContent = LB_REMOTE ? "Ошибка отправки — проверь интернет или URL хранилища." : "Не удалось сохранить.";
+      lbStatus.textContent = LB_REMOTE ? ("Ошибка отправки ("+((e&&e.message)||"сеть")+") — результат сохранён локально.") : "Не удалось сохранить.";
     }
   });
 
