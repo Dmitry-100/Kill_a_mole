@@ -265,55 +265,52 @@
 (function(){
   "use strict";
 
-  /* ====== ЛИДЕРБОРД (общий рейтинг) ======
-     1. Зайди на https://jsonblob.com, замени содержимое на  []  и нажми Save.
-     2. Скопируй URL из адресной строки (вид https://jsonblob.com/<id>)
-        и вставь его ниже в кавычки.
+  /* ====== ЛИДЕРБОРД (общий рейтинг через Google Sheets) ======
+     Настройка (см. инструкцию): создай Google-таблицу → Расширения → Apps Script,
+     вставь серверный код, опубликуй как веб-приложение (доступ: «Все»),
+     скопируй URL вида https://script.google.com/macros/s/.../exec и вставь ниже.
      Пусто = рейтинг локальный (только на этом устройстве). */
-  const LEADERBOARD_URL = "https://jsonblob.com/api/jsonBlob/019ef98f-c9bd-7464-9a56-03cbeedc3a79";
+  const LEADERBOARD_URL = "";
 
   const LB_MAX = 100;   // сколько результатов храним
   const LB_SHOW = 10;   // сколько показываем в таблице
-  function lbApi(u){
-    u=(u||"").trim();
-    if(!u) return "";
-    if(u.indexOf("/api/jsonBlob/")>=0) return u;
-    const m=u.match(/jsonblob\.com\/([0-9a-fA-F-]+)/);
-    if(m) return "https://jsonblob.com/api/jsonBlob/"+m[1];
-    return u;
-  }
-  const LB_ENDPOINT = lbApi(LEADERBOARD_URL);
+  const LB_ENDPOINT = (LEADERBOARD_URL||"").trim();
   const LB_REMOTE = !!LB_ENDPOINT;
-  let lastTs=0, submittedTs=0;
+  let lastTs=0, submittedTs=0, lbCbN=0;
 
   function lbLocalGet(){ try{ return JSON.parse(localStorage.getItem("wam_board")||"[]")||[]; }catch(e){ return []; } }
   function lbLocalSet(a){ try{ localStorage.setItem("wam_board", JSON.stringify(a)); }catch(e){} }
   function lbSort(a){ return a.slice().sort((x,y)=>(y.s-x.s)||((x.t||0)-(y.t||0))).slice(0,LB_MAX); }
 
+  // Чтение через JSONP — обходит CORS и блокировки fetch (Brave/сеть)
+  function lbJsonp(){
+    return new Promise((resolve, reject)=>{
+      const cb = "lbcb_" + (++lbCbN);
+      const s = document.createElement("script");
+      let done = false;
+      function cleanup(){ try{ delete window[cb]; }catch(e){ window[cb]=undefined; } if(s.parentNode) s.parentNode.removeChild(s); clearTimeout(timer); }
+      const timer = setTimeout(()=>{ if(!done){ done=true; cleanup(); reject(new Error("timeout")); } }, 9000);
+      window[cb] = (data)=>{ if(done) return; done=true; cleanup(); resolve(Array.isArray(data)?data:[]); };
+      s.onerror = ()=>{ if(!done){ done=true; cleanup(); reject(new Error("Load failed")); } };
+      s.src = LB_ENDPOINT + (LB_ENDPOINT.indexOf("?")>=0?"&":"?") + "callback=" + cb + "&_=" + Date.now();
+      document.head.appendChild(s);
+    });
+  }
+
   async function lbFetch(){
     if(!LB_REMOTE) return lbLocalGet();
-    let lastErr;
-    for(let attempt=0; attempt<2; attempt++){
-      try{
-        // анти-кэш через query (cache:"no-store" вызывает "Load failed" в iOS Safari)
-        const u = LB_ENDPOINT + (LB_ENDPOINT.indexOf("?")>=0?"&":"?") + "_=" + Date.now();
-        const r = await fetch(u, {headers:{"Accept":"application/json"}});
-        if(!r.ok) throw new Error("HTTP "+r.status);
-        const d = await r.json();
-        return Array.isArray(d) ? d : [];
-      }catch(e){ lastErr=e; }
-    }
-    throw lastErr || new Error("сеть");
+    return await lbJsonp();
   }
+
   async function lbSubmit(entry){
     lbLocalSet(lbSort(lbLocalGet().concat([entry])));   // всегда мирроним локально
     if(!LB_REMOTE) return lbLocalGet();
-    let a=[]; try{ a=await lbFetch(); }catch(e){ a=[]; }
-    a = lbSort(a.concat([entry]));
-    const r = await fetch(LB_ENDPOINT, {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(a)});
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    lbLocalSet(a);
-    return a;
+    // запись: POST no-cors (ответ непрозрачный, но строка добавится в таблицу)
+    await fetch(LB_ENDPOINT, {method:"POST", mode:"no-cors", body:JSON.stringify(entry)});
+    // даём серверу записать и читаем свежий топ
+    await new Promise(r=>setTimeout(r, 700));
+    try{ const fresh = await lbJsonp(); return fresh.length ? fresh : lbSort(lbLocalGet()); }
+    catch(e){ return lbSort(lbLocalGet()); }
   }
   function lbEsc(s){ return String(s).replace(/[<>&]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
   const LB_MEDAL=["🥇","🥈","🥉"];
